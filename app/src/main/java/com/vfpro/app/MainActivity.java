@@ -14,8 +14,12 @@ import android.graphics.Color;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.ScrollView;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 
 public class MainActivity extends Activity {
     private WebView webView;
@@ -60,10 +64,28 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
-        Python.getInstance().getModule("server").callAttr("start_server",
-            getFilesDir().getAbsolutePath() + "/vfpro_data");
-        waitForServer(0);
+        try {
+            if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
+            Python.getInstance().getModule("server").callAttr("start_server",
+                getFilesDir().getAbsolutePath() + "/vfpro_data");
+            waitForServer(0);
+        } catch (Throwable error) {
+            showStartupError(error);
+        }
+    }
+
+    private void showStartupError(Throwable error) {
+        StringWriter sw = new StringWriter();
+        error.printStackTrace(new PrintWriter(sw));
+        TextView message = new TextView(this);
+        message.setTextColor(Color.WHITE);
+        message.setTextSize(13);
+        message.setPadding(28, 32, 28, 32);
+        message.setText("V&F Pro startup error\n\n" + sw.toString());
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(Color.rgb(7, 22, 58));
+        scroll.addView(message);
+        setContentView(scroll);
     }
 
     private void waitForServer(int attempt) {
