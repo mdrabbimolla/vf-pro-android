@@ -1,0 +1,31 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.vfpro.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.vfpro.app'
+        minSdk 24
+        targetSdk 28
+        versionCode 4
+        versionName '4.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        buildPython '3.11'
+        pip {
+            install 'Flask==3.1.1'
+        }
+    }
+}

@@ -14,7 +14,6 @@ import android.graphics.Color;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
-import android.widget.TextView;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
@@ -22,7 +21,6 @@ public class MainActivity extends Activity {
     private WebView webView;
     private ProgressBar progress;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private boolean loaded = false;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -48,10 +46,7 @@ public class MainActivity extends Activity {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme();
                 if (!scheme.equals("http") && !scheme.equals("https")) {
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-                        startActivity(intent);
-                    } catch (Exception ignored) {}
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) {}
                     return true;
                 }
                 if (uri.getHost() != null && !uri.getHost().equals("127.0.0.1")) {
@@ -61,18 +56,18 @@ public class MainActivity extends Activity {
                 return false;
             }
             @Override public void onPageFinished(WebView view, String url) {
-                loaded = true;
                 progress.setVisibility(View.GONE);
             }
         });
 
         if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
-        Python.getInstance().getModule("server").callAttr("start_server");
+        Python.getInstance().getModule("server").callAttr("start_server",
+            getFilesDir().getAbsolutePath() + "/vfpro_data");
         waitForServer(0);
     }
 
     private void waitForServer(int attempt) {
-        if (attempt > 40) {
+        if (attempt > 60) {
             progress.setVisibility(View.GONE);
             webView.loadData("<html><body style='font-family:sans-serif;padding:28px;color:#102040'><h2>V&amp;F Pro চালু করা যাচ্ছে না</h2><p>অ্যাপটি বন্ধ করে আবার খুলুন।</p></body></html>", "text/html", "UTF-8");
             return;
