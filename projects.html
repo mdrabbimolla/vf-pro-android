@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f4f7fc"><title>Projects | V&F Pro</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body><main class="shell">
+<header class="top"><a class="brand" href="{{ url_for('dashboard') }}">V<span>&</span>F Pro</a><div class="top-account"><div class="user">{{ session.get('full_name','') }} · Admin</div><form method="post" action="{{ url_for('logout') }}"><button class="btn logout">Logout</button></form></div></header>
+<nav class="nav"><a href="{{ url_for('dashboard') }}">Overview</a><a href="{{ url_for('visits') }}">Visits</a><a href="{{ url_for('followups') }}">Follow-ups</a><a class="active" href="{{ url_for('projects') }}">Projects</a><a href="{{ url_for('users') }}">Users</a></nav>
+{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ 'error' if category=='error' else '' }}">{{ message }}</div>{% endfor %}{% endwith %}
+<div class="page-heading"><h1>Project Management</h1><p class="sub">Project যোগ, নাম পরিবর্তন এবং Active / Inactive পরিচালনা করুন।</p></div>
+<section class="admin-layout">
+<div class="card admin-form-card"><div class="admin-card-heading"><span class="admin-icon">＋</span><div><h2>Add New Project</h2><p class="small">নতুন Project তৈরি করুন</p></div></div>
+<form class="stack" method="post"><div class="field"><label for="project-name">Project Name *</label><input id="project-name" name="name" required maxlength="120" placeholder="যেমন: Arkam Metro Park"></div><button class="btn primary full-btn">Add Project</button></form></div>
+<section class="admin-list-section"><div class="section-title"><h2>Your Projects</h2><span class="count">{{ rows|length }} projects</span></div>
+<div class="admin-card-list">{% for x in rows %}<article class="admin-item-card"><div class="admin-item-top"><div class="admin-item-symbol">⌂</div><div class="admin-item-info"><div class="admin-item-name">{{ x.name }}</div><div class="small">{{ x.linked_count }} linked visit / follow-up records</div></div><span class="status-tag {{ 'is-active' if x.active else 'is-inactive' }}">{{ 'Active' if x.active else 'Inactive' }}</span></div>
+<form class="admin-edit-row" method="post" action="{{ url_for('edit_project', project_id=x.id) }}"><label class="sr-only" for="project-{{x.id}}">Project name</label><input id="project-{{x.id}}" name="name" value="{{ x.name }}" required maxlength="120"><button class="btn">Save Name</button></form>
+<div class="admin-item-bottom"><span class="small">Project status</span><form method="post" action="{{ url_for('toggle_project', project_id=x.id) }}"><button class="btn {{ 'danger' if x.active else 'primary' }}">{{ 'Deactivate' if x.active else 'Activate' }}</button></form></div></article>{% else %}<div class="card empty-state"><div class="empty-icon">⌂</div><strong>No projects yet</strong><p class="small">উপরের ফর্ম থেকে প্রথম Project যোগ করুন।</p></div>{% endfor %}</div></section></section>
+</main></body></html>
