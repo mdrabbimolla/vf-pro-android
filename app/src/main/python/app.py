@@ -27,7 +27,7 @@ def load_secret():
 
 app = Flask(__name__)
 app.config.update(SECRET_KEY=load_secret(), SESSION_COOKIE_HTTPONLY=True,
-                  SESSION_COOKIE_SAMESITE="Lax")
+                  SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE","0")=="1", PERMANENT_SESSION_LIFETIME=1209600)
 
 def db():
     if "db" not in g:
@@ -139,6 +139,17 @@ def wa_number(value):
 def inject_globals():
     return {"today": date.today().isoformat()}
 
+@app.route("/healthz")
+def healthz():
+    return {"status": "ok", "app": "V&F Pro"}, 200
+
+@app.route("/sw.js")
+def service_worker():
+    response = app.send_static_file("sw.js")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
 @app.route("/")
 def home():
     return redirect(url_for("dashboard") if session.get("user_id") else url_for("login"))
@@ -174,6 +185,7 @@ def login():
         user = db().execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
         if user and check_password_hash(user["password_hash"], password):
             session.clear()
+            session.permanent = True
             session["user_id"] = user["id"]
             session["username"] = user["username"]
             session["full_name"] = user["full_name"]

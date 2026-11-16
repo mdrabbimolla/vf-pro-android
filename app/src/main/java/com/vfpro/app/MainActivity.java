@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private static final int REQUEST_DOCUMENT_SCAN = 7302;
     private TextRecognizer textRecognizer;
+    private String cloudBaseUrl = "";
 
     public class AndroidBridge {
         @JavascriptInterface
@@ -100,7 +101,7 @@ public class MainActivity extends Activity {
                     try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) {}
                     return true;
                 }
-                if (uri.getHost() != null && !uri.getHost().equals("127.0.0.1")) {
+                if (!isAppHost(uri.getHost())) {
                     try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) {}
                     return true;
                 }
@@ -108,11 +109,17 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 progress.setVisibility(View.GONE);
-                if (url != null && url.startsWith("http://127.0.0.1:5001/")) {
+                if (url != null && (url.startsWith("http://127.0.0.1:5001/") || (!cloudBaseUrl.isEmpty() && url.startsWith(cloudBaseUrl)))) {
                     view.evaluateJavascript("(function(){fetch('/api/reminders').then(r=>r.ok?r.json():null).then(d=>{if(d&&window.VfAndroid)window.VfAndroid.syncReminders(JSON.stringify(d.items||[]));}).catch(()=>{});})()", null);
                 }
             }
         });
+
+        cloudBaseUrl = readCloudUrl();
+        if (!cloudBaseUrl.isEmpty()) {
+            webView.loadUrl(cloudBaseUrl);
+            return;
+        }
 
         try {
             if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
@@ -124,6 +131,21 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    private String readCloudUrl() {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(getAssets().open("cloud_url.txt")))) {
+            String value = reader.readLine();
+            value = value == null ? "" : value.trim();
+            return value.startsWith("https://") ? value : "";
+        } catch (Exception ignored) { return ""; }
+    }
+
+    private boolean isAppHost(String host) {
+        if (host == null) return false;
+        if (host.equals("127.0.0.1")) return true;
+        try { return !cloudBaseUrl.isEmpty() && host.equals(new java.net.URL(cloudBaseUrl).getHost()); }
+        catch (Exception ignored) { return false; }
+    }
 
     private void launchLeadScanner() {
         GmsDocumentScannerOptions options = new GmsDocumentScannerOptions.Builder()
