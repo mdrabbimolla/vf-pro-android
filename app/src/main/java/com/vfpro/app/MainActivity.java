@@ -8,6 +8,9 @@ import android.content.Intent;
 import android.net.Uri;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
+import android.webkit.JsResult;
+import android.app.AlertDialog;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.graphics.Color;
@@ -44,6 +47,18 @@ public class MainActivity extends Activity {
         root.addView(webView, new FrameLayout.LayoutParams(-1, -1));
         root.addView(progress, p);
         setContentView(root);
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this)
+                    .setMessage(message)
+                    .setPositiveButton("হ্যাঁ", (dialog, which) -> result.confirm())
+                    .setNegativeButton("বাতিল", (dialog, which) -> result.cancel())
+                    .setOnCancelListener(dialog -> result.cancel())
+                    .show();
+                return true;
+            }
+        });
 
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
