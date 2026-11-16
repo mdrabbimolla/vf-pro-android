@@ -1,15 +1,18 @@
 package com.vfpro.app;
 
+import android.Manifest;
 import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.JsResult;
+import android.webkit.JavascriptInterface;
 import android.app.AlertDialog;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -19,20 +22,30 @@ import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.ScrollView;
+import android.os.Build;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
 public class MainActivity extends Activity {
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 7301;
     private WebView webView;
     private ProgressBar progress;
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    public class AndroidBridge {
+        @JavascriptInterface
+        public void syncReminders(String json) {
+            ReminderScheduler.sync(MainActivity.this, json);
+        }
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().setStatusBarColor(Color.rgb(7, 22, 58));
         getWindow().setNavigationBarColor(Color.rgb(7, 22, 58));
+        requestNotificationPermission();
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(7, 22, 58));
         webView = new WebView(this);
@@ -41,6 +54,7 @@ public class MainActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setLoadsImagesAutomatically(true);
         settings.setSupportZoom(false);
+        webView.addJavascriptInterface(new AndroidBridge(), "VfAndroid");
         progress = new ProgressBar(this);
         FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(100, 100);
         p.gravity = android.view.Gravity.CENTER;
@@ -76,6 +90,9 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 progress.setVisibility(View.GONE);
+                if (url != null && url.startsWith("http://127.0.0.1:5001/")) {
+                    view.evaluateJavascript("(function(){fetch('/api/reminders').then(r=>r.ok?r.json():null).then(d=>{if(d&&window.VfAndroid)window.VfAndroid.syncReminders(JSON.stringify(d.items||[]));}).catch(()=>{});})()", null);
+                }
             }
         });
 
@@ -86,6 +103,13 @@ public class MainActivity extends Activity {
             waitForServer(0);
         } catch (Throwable error) {
             showStartupError(error);
+        }
+    }
+
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
         }
     }
 

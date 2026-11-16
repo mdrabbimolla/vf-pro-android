@@ -61,6 +61,7 @@ def init_db():
       phone TEXT NOT NULL,
       project TEXT DEFAULT '',
       visit_date TEXT NOT NULL,
+      visit_time TEXT NOT NULL DEFAULT '09:00',
       purpose TEXT DEFAULT '',
       notes TEXT DEFAULT '',
       created_by INTEGER NOT NULL REFERENCES users(id),
@@ -72,6 +73,7 @@ def init_db():
       phone TEXT NOT NULL,
       project TEXT DEFAULT '',
       due_date TEXT NOT NULL,
+      due_time TEXT NOT NULL DEFAULT '09:00',
       details TEXT DEFAULT '',
       status TEXT NOT NULL DEFAULT 'Pending'
         CHECK(status IN ('Pending','Completed','Cancelled')),
@@ -88,6 +90,14 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_visits_date ON visits(visit_date);
     CREATE INDEX IF NOT EXISTS idx_followups_due ON followups(due_date, status);
     """)
+    # Safe schema migrations for scheduled reminder times.
+    visit_columns = [row[1] for row in conn.execute("PRAGMA table_info(visits)").fetchall()]
+    if "visit_time" not in visit_columns:
+        conn.execute("ALTER TABLE visits ADD COLUMN visit_time TEXT NOT NULL DEFAULT '09:00'")
+    followup_columns = [row[1] for row in conn.execute("PRAGMA table_info(followups)").fetchall()]
+    if "due_time" not in followup_columns:
+        conn.execute("ALTER TABLE followups ADD COLUMN due_time TEXT NOT NULL DEFAULT '09:00'")
+
     # Safe schema migration: remember the Visit created from each Follow-up.
     columns = [row[1] for row in conn.execute("PRAGMA table_info(followups)").fetchall()]
     if "converted_visit_id" not in columns:
@@ -208,14 +218,20 @@ def visits():
         name=request.form.get("client_name","").strip()
         phone=request.form.get("phone","").strip()
         visit_date=request.form.get("visit_date","").strip()
-        if not name or not phone or not visit_date:
-            flash("ক্লায়েন্টের নাম, ফোন ও ভিজিটের তারিখ প্রয়োজন।","error")
+        visit_time=request.form.get("visit_time","").strip()
+        if not name or not phone or not visit_date or not visit_time:
+            flash("ক্লায়েন্টের নাম, ফোন, ভিজিটের তারিখ ও সময় প্রয়োজন।","error")
         else:
-            conn.execute("""INSERT INTO visits(client_name,phone,project,visit_date,purpose,notes,created_by,created_at)
-              VALUES(?,?,?,?,?,?,?,?)""",
-              (name,phone,request.form.get("project","").strip(),visit_date,
-               request.form.get("purpose","").strip(),request.form.get("notes","").strip(),
-               session["user_id"],datetime.now().isoformat(timespec="seconds")))
+            try:
+                datetime.strptime(visit_date + " " + visit_time, "%Y-%m-%d %H:%M")
+                conn.execute("""INSERT INTO visits(client_name,phone,project,visit_date,visit_time,purpose,notes,created_by,created_at)
+                  VALUES(?,?,?,?,?,?,?,?,?)""",
+                  (name,phone,request.form.get("project","").strip(),visit_date,visit_time,
+                   request.form.get("purpose","").strip(),request.form.get("notes","").strip(),
+                   session["user_id"],datetime.now().isoformat(timespec="seconds")))
+            except ValueError:
+                flash("সঠিক Visit তারিখ ও সময় নির্বাচন করুন।","error")
+                return redirect(url_for("visits"))
             conn.commit()
             flash("Visit সংরক্ষণ হয়েছে।","success")
             return redirect(url_for("visits"))
@@ -234,13 +250,19 @@ def followups():
         name=request.form.get("client_name","").strip()
         phone=request.form.get("phone","").strip()
         due_date=request.form.get("due_date","").strip()
-        if not name or not phone or not due_date:
-            flash("ক্লায়েন্টের নাম, ফোন ও Follow-up তারিখ প্রয়োজন।","error")
+        due_time=request.form.get("due_time","").strip()
+        if not name or not phone or not due_date or not due_time:
+            flash("ক্লায়েন্টের নাম, ফোন, Follow-up তারিখ ও সময় প্রয়োজন।","error")
         else:
-            conn.execute("""INSERT INTO followups(client_name,phone,project,due_date,details,status,created_by,created_at)
-              VALUES(?,?,?,?,?,'Pending',?,?)""",
-              (name,phone,request.form.get("project","").strip(),due_date,
-               request.form.get("details","").strip(),session["user_id"],datetime.now().isoformat(timespec="seconds")))
+            try:
+                datetime.strptime(due_date + " " + due_time, "%Y-%m-%d %H:%M")
+                conn.execute("""INSERT INTO followups(client_name,phone,project,due_date,due_time,details,status,created_by,created_at)
+                  VALUES(?,?,?,?,?,?,'Pending',?,?)""",
+                  (name,phone,request.form.get("project","").strip(),due_date,due_time,
+                   request.form.get("details","").strip(),session["user_id"],datetime.now().isoformat(timespec="seconds")))
+            except ValueError:
+                flash("সঠিক Follow-up তারিখ ও সময় নির্বাচন করুন।","error")
+                return redirect(url_for("followups"))
             conn.commit()
             flash("Follow-up সংরক্ষণ হয়েছে।","success")
             return redirect(url_for("followups"))
@@ -278,16 +300,17 @@ def convert_followup(item_id):
         flash("এই Follow-up থেকে Visit আগেই তৈরি হয়েছে।", "error")
     else:
         visit_date=request.form.get("visit_date","").strip() or date.today().isoformat()
+        visit_time=request.form.get("visit_time","").strip() or item["due_time"]
         try:
-            date.fromisoformat(visit_date)
+            datetime.strptime(visit_date + " " + visit_time, "%Y-%m-%d %H:%M")
         except ValueError:
-            flash("সঠিক Visit তারিখ নির্বাচন করুন।", "error")
+            flash("সঠিক Visit তারিখ ও সময় নির্বাচন করুন।", "error")
             return redirect(url_for("followups"))
         now=datetime.now().isoformat(timespec="seconds")
         try:
             conn.execute("BEGIN IMMEDIATE")
-            cur=conn.execute("""INSERT INTO visits(client_name,phone,project,visit_date,purpose,notes,created_by,created_at)
-                VALUES(?,?,?,?,?,?,?,?)""", (item["client_name"],item["phone"],item["project"],visit_date,
+            cur=conn.execute("""INSERT INTO visits(client_name,phone,project,visit_date,visit_time,purpose,notes,created_by,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?)""", (item["client_name"],item["phone"],item["project"],visit_date,visit_time,
                 request.form.get("purpose","Follow-up থেকে Visit").strip(),
                 request.form.get("notes",item["details"] or "").strip(),item["created_by"],now))
             visit_id=cur.lastrowid
@@ -324,6 +347,28 @@ def delete_followup(item_id):
     else:
         conn.execute("DELETE FROM followups WHERE id=?",(item_id,)); conn.commit(); flash("Follow-up মুছে ফেলা হয়েছে।", "success")
     return redirect(url_for("followups"))
+
+
+@app.route("/api/reminders")
+@login_required
+def api_reminders():
+    conn = db()
+    if session["role"] == "admin":
+        visits_rows = conn.execute("SELECT id,client_name,project,visit_date,visit_time FROM visits").fetchall()
+        followup_rows = conn.execute("SELECT id,client_name,project,due_date,due_time FROM followups WHERE status='Pending'").fetchall()
+    else:
+        visits_rows = conn.execute("SELECT id,client_name,project,visit_date,visit_time FROM visits WHERE created_by=?", (session["user_id"],)).fetchall()
+        followup_rows = conn.execute("SELECT id,client_name,project,due_date,due_time FROM followups WHERE status='Pending' AND created_by=?", (session["user_id"],)).fetchall()
+    items = []
+    for row in visits_rows:
+        items.append({"key":"visit-" + str(row["id"]), "type":"Visit", "id":row["id"],
+                      "client":row["client_name"], "project":row["project"] or "",
+                      "at":row["visit_date"] + "T" + row["visit_time"]})
+    for row in followup_rows:
+        items.append({"key":"followup-" + str(row["id"]), "type":"Follow-up", "id":row["id"],
+                      "client":row["client_name"], "project":row["project"] or "",
+                      "at":row["due_date"] + "T" + row["due_time"]})
+    return {"items":items}
 
 @app.route("/projects", methods=["GET","POST"])
 @admin_required
