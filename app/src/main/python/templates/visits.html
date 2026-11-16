@@ -22,14 +22,14 @@
   function cleanPhone(v){return (v||'').replace(/\D/g,'').replace(/^0088/,'88');}
   function parse(text){
     const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean), found=[];
-    const re=/(?:\+?88)?01[3-9]\d[\s-]?\d{6}/g;
+    const re=/(?:\+?88)?01[3-9][\s-]?\d{4}[\s-]?\d{4}/g;
     for(let i=0;i<lines.length;i++){
       let m, line=lines[i], matches=[];
       while((m=re.exec(line))!==null) matches.push(m);
       for(const hit of matches){
         const phone=cleanPhone(hit[0]);
         let name=line.slice(0,hit.index).replace(/[|,:;\-]+$/,'').trim();
-        if(!name && i>0 && !/(?:\+?88)?01[3-9]\d/.test(lines[i-1])) name=lines[i-1];
+        if(!name && i>0 && !/(?:\+?88)?01[3-9][\s-]?\d{4}[\s-]?\d{4}/.test(lines[i-1])) name=lines[i-1];
         let project='', notes=[];
         for(let j=i+1;j<Math.min(lines.length,i+4);j++){
           if(re.test(lines[j])) {re.lastIndex=0;break;} re.lastIndex=0;
