@@ -1,6 +1,6 @@
 
 import os, sqlite3, secrets, re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -27,7 +27,7 @@ def load_secret():
 
 app = Flask(__name__)
 app.config.update(SECRET_KEY=load_secret(), SESSION_COOKIE_HTTPONLY=True,
-                  SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE","0")=="1", PERMANENT_SESSION_LIFETIME=1209600)
+                  SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE","0")=="1", PERMANENT_SESSION_LIFETIME=timedelta(days=14))
 
 def db():
     if "db" not in g:
