@@ -12,6 +12,8 @@ services:
       mountPath: /var/data
       sizeGB: 1
     envVars:
+      - key: TZ
+        value: Asia/Dhaka
       - key: APP_DATA_DIR
         value: /var/data
       - key: COOKIE_SECURE
