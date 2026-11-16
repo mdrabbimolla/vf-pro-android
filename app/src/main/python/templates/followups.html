@@ -1,3 +1,67 @@
 <!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f4f7fc"><title>Follow-ups | V&F Pro</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body><main class="shell"><header class="top"><a class="brand" href="{{ url_for('dashboard') }}">V<span>&</span>F Pro</a><div class="profile"><div class="user">{{ session.get('full_name','') }} · {{ session.get('role','')|title }}</div><form method="post" action="{{ url_for('logout') }}"><button class="btn logout">Logout</button></form></div></header>
-<nav class="nav"><a class="{{ 'active' if active=='dashboard' else '' }}" href="{{ url_for('dashboard') }}">Overview</a><a class="{{ 'active' if active=='visits' else '' }}" href="{{ url_for('visits') }}">Visits</a><a class="{{ 'active' if active=='followups' else '' }}" href="{{ url_for('followups') }}">Follow-ups</a>{% if session.get('role')=='admin' %}<a class="{{ 'active' if active=='projects' else '' }}" href="{{ url_for('projects') }}">Projects</a><a class="{{ 'active' if active=='users' else '' }}" href="{{ url_for('users') }}">Users</a>{% endif %}</nav>{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ 'error' if category=='error' else '' }}">{{ message }}</div>{% endfor %}{% endwith %}<div class="page-heading"><h1>Follow-up Management</h1><p class="sub">পরবর্তী যোগাযোগের সময় ঠিক রাখুন এবং প্রয়োজন হলে সরাসরি Visit তৈরি করুন।</p></div><section class="form-card card"><h2>New Follow-up</h2><form class="stack" method="post"><div class="form-grid"><div class="field"><label>Client Name *</label><input name="client_name" required></div><div class="field"><label>Phone *</label><input name="phone" inputmode="tel" required></div><div class="field"><label>Project</label><select name="project"><option value="">Select Project</option>{% for project in projects %}<option value="{{project.name}}">{{project.name}}</option>{% endfor %}</select></div><div class="field"><label>Follow-up Date *</label><input type="date" name="due_date" value="{{today}}" required></div><div class="field"><label>Follow-up Time *</label><input type="time" name="due_time" value="09:00" required></div><div class="field full"><label>Details / Next Action</label><textarea name="details"></textarea></div></div><button class="btn primary full-btn">Save Follow-up</button></form></section>
+<nav class="nav"><a class="{{ 'active' if active=='dashboard' else '' }}" href="{{ url_for('dashboard') }}">Overview</a><a class="{{ 'active' if active=='visits' else '' }}" href="{{ url_for('visits') }}">Visits</a><a class="{{ 'active' if active=='followups' else '' }}" href="{{ url_for('followups') }}">Follow-ups</a>{% if session.get('role')=='admin' %}<a class="{{ 'active' if active=='projects' else '' }}" href="{{ url_for('projects') }}">Projects</a><a class="{{ 'active' if active=='users' else '' }}" href="{{ url_for('users') }}">Users</a>{% endif %}</nav>{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ 'error' if category=='error' else '' }}">{{ message }}</div>{% endfor %}{% endwith %}<div class="page-heading"><h1>Follow-up Management</h1><p class="sub">পরবর্তী যোগাযোগের সময় ঠিক রাখুন এবং প্রয়োজন হলে সরাসরি Visit তৈরি করুন।</p></div><section class="form-card card"><h2>New Follow-up</h2>
+<div class="scan-tools" style="margin:0 0 14px"><button type="button" class="btn" onclick="window.VfAndroid&&VfAndroid.startLeadScan()">📷 Scan Lead List</button><small style="display:block;color:#64748b;margin-top:6px">ইংরেজি লেখা কাগজ স্ক্যান করে তথ্য যাচাই করে ফর্মে বসান</small></div>
+<div id="scanPanel" class="card" style="display:none;margin:14px 0;padding:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 style="margin:0">Scanned Leads</h3><button type="button" class="btn" onclick="document.getElementById('scanPanel').style.display='none'">Close</button></div>
+  <p id="scanMessage" style="color:#64748b">OCR result. Select a lead to review it in the form.</p>
+  <textarea id="scanRawText" rows="4" style="width:100%;margin:8px 0" placeholder="Recognized text"></textarea>
+  <div id="scanLeadRows"></div>
+</div>
+<script>
+(function(){
+  const panel=document.getElementById('scanPanel'), raw=document.getElementById('scanRawText'), list=document.getElementById('scanLeadRows'), msg=document.getElementById('scanMessage');
+  function cleanPhone(v){return (v||'').replace(/\\D/g,'').replace(/^0088/,'88');}
+  function parse(text){
+    const lines=text.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean), found=[];
+    const re=/(?:\\+?88)?01[3-9]\\d[\\s-]?\\d{6}/g;
+    for(let i=0;i<lines.length;i++){
+      let m, line=lines[i], matches=[];
+      while((m=re.exec(line))!==null) matches.push(m);
+      for(const hit of matches){
+        const phone=cleanPhone(hit[0]);
+        let name=line.slice(0,hit.index).replace(/[|,:;\\-]+$/,'').trim();
+        if(!name && i>0 && !/(?:\\+?88)?01[3-9]\\d/.test(lines[i-1])) name=lines[i-1];
+        let project='', notes=[];
+        for(let j=i+1;j<Math.min(lines.length,i+4);j++){
+          if(re.test(lines[j])) {re.lastIndex=0;break;} re.lastIndex=0;
+          if(!project) project=lines[j]; else notes.push(lines[j]);
+        }
+        found.push({name:name||'Please enter client name',phone,project,notes:notes.join(' ')});
+      }
+    }
+    return found;
+  }
+  function render(text){
+    const leads=parse(text); list.replaceChildren();
+    msg.textContent=leads.length ? leads.length+' possible lead(s) found. Review each one before saving.' : 'Phone numbers were not detected. You can edit the recognized text and try again.';
+    leads.forEach((lead,index)=>{
+      const card=document.createElement('div'); card.style.cssText='border:1px solid #dbe3ef;border-radius:12px;padding:12px;margin:10px 0';
+      const title=document.createElement('strong'); title.textContent=(index+1)+'. '+lead.name;
+      const details=document.createElement('p'); details.textContent=lead.phone+' · '+(lead.project||'Project not detected');
+      const use=document.createElement('button'); use.type='button'; use.className='btn primary'; use.textContent='Use this lead';
+      use.addEventListener('click',async()=>{
+        let duplicate=false;
+        try{const response=await fetch('/api/phone-exists?phone='+encodeURIComponent(lead.phone)); if(response.ok){const data=await response.json();duplicate=!!data.exists;}}catch(e){}
+        if(duplicate && !confirm('এই ফোন নম্বরটি আগে থেকেই রেকর্ডে আছে। তবুও ফর্মে বসাবেন?')) return;
+        const form=document.querySelector('form.stack[method="post"]')||document.querySelector('form[method="post"]');
+        if(!form)return;
+        const set=(name,value)=>{const el=form.querySelector('[name="'+name+'"]');if(el)el.value=value||'';};
+        set('client_name',lead.name==='Please enter client name'?'':lead.name); set('phone',lead.phone);
+        const project=form.querySelector('[name="project"]');
+        if(project){const option=[...project.options].find(o=>o.value.toLowerCase()===lead.project.toLowerCase()||o.text.toLowerCase()===lead.project.toLowerCase());project.value=option?option.value:'';}
+        set('notes',lead.notes||(!project?lead.project:''));
+        set('details',lead.notes||(!project?lead.project:''));
+        panel.style.display='none';
+        form.scrollIntoView({behavior:'smooth',block:'center'});
+      });
+      card.append(title,details,use); list.append(card);
+    });
+    panel.style.display='block'; panel.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  raw.addEventListener('input',()=>render(raw.value));
+  window.onVfLeadScan=function(text){raw.value=text||'';render(raw.value);};
+  window.onVfLeadScanError=function(message){panel.style.display='block';msg.textContent=message;};
+})();
+</script>
+<form class="stack" method="post"><div class="form-grid"><div class="field"><label>Client Name *</label><input name="client_name" required></div><div class="field"><label>Phone *</label><input name="phone" inputmode="tel" required></div><div class="field"><label>Project</label><select name="project"><option value="">Select Project</option>{% for project in projects %}<option value="{{project.name}}">{{project.name}}</option>{% endfor %}</select></div><div class="field"><label>Follow-up Date *</label><input type="date" name="due_date" value="{{today}}" required></div><div class="field"><label>Follow-up Time *</label><input type="time" name="due_time" value="09:00" required></div><div class="field full"><label>Details / Next Action</label><textarea name="details"></textarea></div></div><button class="btn primary full-btn">Save Follow-up</button></form></section>
 <section class="list-section"><div class="section-title"><h2>Follow-up List</h2><span class="count">{{ rows|length }} records</span></div><div class="record-list">{% for x in rows %}<article class="record-card"><div class="record-main"><div><div class="record-name">{{x.client_name}}</div><a class="record-phone" href="tel:{{x.phone}}">{{x.phone}}</a></div><span class="pill {{x.status}}">{{x.status}}</span></div><div class="record-meta"><span><b>Due:</b> {{x.due_date}} · {{x.due_time}}</span><span><b>Project:</b> {{x.project or 'Not assigned'}}</span><span><b>By:</b> {{x.full_name}}</span></div>{% if x.details %}<p class="record-notes">{{x.details}}</p>{% endif %}<div class="record-actions"><a class="btn" href="tel:{{x.phone}}">Call</a><a class="btn" target="_blank" rel="noopener" href="https://wa.me/{{x.phone|wa_number}}">WhatsApp</a>{% if x.converted_visit_id %}<a class="visit-added" href="{{url_for('visits')}}">Visit Added ✓ · View Visits</a>{% else %}<form class="convert-form" method="post" action="{{url_for('convert_followup',item_id=x.id)}}" onsubmit="return confirm('এই Follow-up থেকে Visit তৈরি করবেন?')"><input aria-label="Visit date" type="date" name="visit_date" value="{{today}}" required><input aria-label="Visit time" type="time" name="visit_time" value="{{x.due_time}}" required><button class="btn primary">＋ Add to Visit</button></form>{% endif %}</div><div class="record-footer"><form class="status-form" method="post" action="{{url_for('update_followup',item_id=x.id)}}"><select name="status" aria-label="Follow-up status"><option {{'selected' if x.status=='Pending' else ''}}>Pending</option><option {{'selected' if x.status=='Completed' else ''}}>Completed</option><option {{'selected' if x.status=='Cancelled' else ''}}>Cancelled</option></select><button class="btn">Save Status</button></form><form method="post" action="{{url_for('delete_followup',item_id=x.id)}}" onsubmit="return confirm('এই Follow-up স্থায়ীভাবে মুছে ফেলবেন?')"><button class="btn danger">Delete</button></form></div></article>{% else %}<div class="empty card">এখনো কোনো Follow-up যোগ করা হয়নি।</div>{% endfor %}</div></section></main></body></html>

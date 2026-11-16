@@ -8,6 +8,70 @@
 {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="flash {{ 'error' if category=='error' else '' }}">{{ message }}</div>{% endfor %}{% endwith %}
 <section class="visits-hero"><div><span class="hero-kicker">CLIENT RELATIONSHIP TRACKER</span><h1>Visit Management</h1><p>প্রতিটি ক্লায়েন্ট ভিজিটের তথ্য সংরক্ষণ করুন এবং পরবর্তী যোগাযোগ সহজ করুন।</p></div><div class="hero-total"><span>TOTAL VISITS</span><strong>{{ rows|length }}</strong><small>সর্বমোট রেকর্ড</small></div></section>
 <section class="visit-entry card"><div class="visit-entry-heading"><div class="entry-icon">＋</div><div><h2>Record a New Visit</h2><p>নতুন ক্লায়েন্ট ভিজিটের তথ্য যোগ করুন</p></div></div>
+
+<div class="scan-tools" style="margin:0 0 14px"><button type="button" class="btn" onclick="window.VfAndroid&&VfAndroid.startLeadScan()">📷 Scan Lead List</button><small style="display:block;color:#64748b;margin-top:6px">ইংরেজি লেখা কাগজ স্ক্যান করে তথ্য যাচাই করে ফর্মে বসান</small></div>
+<div id="scanPanel" class="card" style="display:none;margin:14px 0;padding:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3 style="margin:0">Scanned Leads</h3><button type="button" class="btn" onclick="document.getElementById('scanPanel').style.display='none'">Close</button></div>
+  <p id="scanMessage" style="color:#64748b">OCR result. Select a lead to review it in the form.</p>
+  <textarea id="scanRawText" rows="4" style="width:100%;margin:8px 0" placeholder="Recognized text"></textarea>
+  <div id="scanLeadRows"></div>
+</div>
+<script>
+(function(){
+  const panel=document.getElementById('scanPanel'), raw=document.getElementById('scanRawText'), list=document.getElementById('scanLeadRows'), msg=document.getElementById('scanMessage');
+  function cleanPhone(v){return (v||'').replace(/\\D/g,'').replace(/^0088/,'88');}
+  function parse(text){
+    const lines=text.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean), found=[];
+    const re=/(?:\\+?88)?01[3-9]\\d[\\s-]?\\d{6}/g;
+    for(let i=0;i<lines.length;i++){
+      let m, line=lines[i], matches=[];
+      while((m=re.exec(line))!==null) matches.push(m);
+      for(const hit of matches){
+        const phone=cleanPhone(hit[0]);
+        let name=line.slice(0,hit.index).replace(/[|,:;\\-]+$/,'').trim();
+        if(!name && i>0 && !/(?:\\+?88)?01[3-9]\\d/.test(lines[i-1])) name=lines[i-1];
+        let project='', notes=[];
+        for(let j=i+1;j<Math.min(lines.length,i+4);j++){
+          if(re.test(lines[j])) {re.lastIndex=0;break;} re.lastIndex=0;
+          if(!project) project=lines[j]; else notes.push(lines[j]);
+        }
+        found.push({name:name||'Please enter client name',phone,project,notes:notes.join(' ')});
+      }
+    }
+    return found;
+  }
+  function render(text){
+    const leads=parse(text); list.replaceChildren();
+    msg.textContent=leads.length ? leads.length+' possible lead(s) found. Review each one before saving.' : 'Phone numbers were not detected. You can edit the recognized text and try again.';
+    leads.forEach((lead,index)=>{
+      const card=document.createElement('div'); card.style.cssText='border:1px solid #dbe3ef;border-radius:12px;padding:12px;margin:10px 0';
+      const title=document.createElement('strong'); title.textContent=(index+1)+'. '+lead.name;
+      const details=document.createElement('p'); details.textContent=lead.phone+' · '+(lead.project||'Project not detected');
+      const use=document.createElement('button'); use.type='button'; use.className='btn primary'; use.textContent='Use this lead';
+      use.addEventListener('click',async()=>{
+        let duplicate=false;
+        try{const response=await fetch('/api/phone-exists?phone='+encodeURIComponent(lead.phone)); if(response.ok){const data=await response.json();duplicate=!!data.exists;}}catch(e){}
+        if(duplicate && !confirm('এই ফোন নম্বরটি আগে থেকেই রেকর্ডে আছে। তবুও ফর্মে বসাবেন?')) return;
+        const form=document.querySelector('form.stack[method="post"]')||document.querySelector('form[method="post"]');
+        if(!form)return;
+        const set=(name,value)=>{const el=form.querySelector('[name="'+name+'"]');if(el)el.value=value||'';};
+        set('client_name',lead.name==='Please enter client name'?'':lead.name); set('phone',lead.phone);
+        const project=form.querySelector('[name="project"]');
+        if(project){const option=[...project.options].find(o=>o.value.toLowerCase()===lead.project.toLowerCase()||o.text.toLowerCase()===lead.project.toLowerCase());project.value=option?option.value:'';}
+        set('notes',lead.notes||(!project?lead.project:''));
+        set('details',lead.notes||(!project?lead.project:''));
+        panel.style.display='none';
+        form.scrollIntoView({behavior:'smooth',block:'center'});
+      });
+      card.append(title,details,use); list.append(card);
+    });
+    panel.style.display='block'; panel.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  raw.addEventListener('input',()=>render(raw.value));
+  window.onVfLeadScan=function(text){raw.value=text||'';render(raw.value);};
+  window.onVfLeadScanError=function(message){panel.style.display='block';msg.textContent=message;};
+})();
+</script>
 <form class="stack" method="post"><div class="form-grid"><div class="field"><label>CLIENT NAME *</label><input name="client_name" required placeholder="ক্লায়েন্টের নাম"></div><div class="field"><label>PHONE NUMBER *</label><input name="phone" inputmode="tel" required placeholder="01XXXXXXXXX"></div><div class="field"><label>PROJECT</label><select name="project"><option value="">Select Project</option>{% for project in projects %}<option value="{{project.name}}">{{project.name}}</option>{% endfor %}</select></div><div class="field"><label>VISIT DATE *</label><input type="date" name="visit_date" value="{{today}}" required></div><div class="field"><label>VISIT TIME *</label><input type="time" name="visit_time" value="09:00" required></div><div class="field"><label>VISIT PURPOSE</label><input name="purpose" placeholder="ভিজিটের উদ্দেশ্য"></div><div class="field"><label>NOTES</label><textarea name="notes" placeholder="প্রয়োজনীয় তথ্য বা আলোচনার সারাংশ"></textarea></div></div><button class="btn primary full-btn visit-save">Save Visit <span>→</span></button></form></section>
 <section class="list-section visit-history"><div class="section-title"><div><span class="hero-kicker">YOUR CLIENT ACTIVITY</span><h2>Visit History</h2></div><span class="count">{{ rows|length }} records</span></div>
 <div class="record-list">{% for x in rows %}<article class="record-card visit-record"><div class="record-main"><div class="visit-person"><span class="visit-avatar">{{ x.client_name[:1] }}</span><div><div class="record-name">{{x.client_name}}</div><a class="record-phone" href="tel:{{x.phone}}">{{x.phone}}</a></div></div><span class="date-chip">{{x.visit_date}} · {{x.visit_time}}</span></div><div class="record-meta"><span><b>Project:</b> {{x.project or 'Not assigned'}}</span><span><b>By:</b> {{x.full_name}}</span></div>{% if x.purpose %}<p class="record-notes"><b>Purpose:</b> {{x.purpose}}</p>{% endif %}{% if x.notes %}<p class="record-notes">{{x.notes}}</p>{% endif %}<div class="record-actions"><a class="btn" href="tel:{{x.phone}}">Call</a><a class="btn" target="_blank" rel="noopener" href="https://wa.me/{{x.phone|wa_number}}">WhatsApp</a><form method="post" action="{{url_for('delete_visit',item_id=x.id)}}" onsubmit="return confirm('এই Visit স্থায়ীভাবে মুছে ফেলবেন?')"><button class="btn danger">Delete</button></form></div></article>{% else %}<div class="empty card">এখনো কোনো Visit যোগ করা হয়নি।</div>{% endfor %}</div></section>

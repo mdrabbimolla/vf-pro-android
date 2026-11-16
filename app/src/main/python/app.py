@@ -349,6 +349,20 @@ def delete_followup(item_id):
     return redirect(url_for("followups"))
 
 
+
+@app.route("/api/phone-exists")
+@login_required
+def api_phone_exists():
+    phone = re.sub(r"\\D", "", request.args.get("phone", ""))
+    if not phone:
+        return {"exists": False}
+    conn = db()
+    if session["role"] == "admin":
+        found = conn.execute("SELECT 1 FROM visits WHERE phone=? UNION SELECT 1 FROM followups WHERE phone=? LIMIT 1", (phone, phone)).fetchone()
+    else:
+        found = conn.execute("SELECT 1 FROM visits WHERE phone=? AND created_by=? UNION SELECT 1 FROM followups WHERE phone=? AND created_by=? LIMIT 1", (phone, session["user_id"], phone, session["user_id"])).fetchone()
+    return {"exists": bool(found)}
+
 @app.route("/api/reminders")
 @login_required
 def api_reminders():

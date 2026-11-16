@@ -27,17 +27,35 @@ import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import android.content.IntentSender;
+import com.google.android.gms.mlkit.documents.GmsDocumentScanning;
+import com.google.android.gms.mlkit.documents.GmsDocumentScanner;
+import com.google.android.gms.mlkit.documents.GmsDocumentScannerOptions;
+import com.google.android.gms.mlkit.documents.GmsDocumentScanningResult;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+import com.google.android.gms.tasks.Task;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 7301;
     private WebView webView;
     private ProgressBar progress;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private static final int REQUEST_DOCUMENT_SCAN = 7302;
+    private TextRecognizer textRecognizer;
 
     public class AndroidBridge {
         @JavascriptInterface
         public void syncReminders(String json) {
             ReminderScheduler.sync(MainActivity.this, json);
+        }
+        @JavascriptInterface
+        public void startLeadScan() {
+            runOnUiThread(() -> launchLeadScanner());
         }
     }
 
@@ -46,6 +64,7 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(Color.rgb(7, 22, 58));
         getWindow().setNavigationBarColor(Color.rgb(7, 22, 58));
         requestNotificationPermission();
+        textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(7, 22, 58));
         webView = new WebView(this);
@@ -106,6 +125,74 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    private void launchLeadScanner() {
+        GmsDocumentScannerOptions options = new GmsDocumentScannerOptions.Builder()
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .setGalleryImportAllowed(true)
+            .setPageLimit(10)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .build();
+        GmsDocumentScanner scanner = GmsDocumentScanning.getClient(options);
+        scanner.getStartScanIntent(this)
+            .addOnSuccessListener(sender -> {
+                try {
+                    startIntentSenderForResult(sender, REQUEST_DOCUMENT_SCAN, null, 0, 0, 0);
+                } catch (IntentSender.SendIntentException e) {
+                    sendScanError("স্ক্যানার চালু করা যায়নি: " + e.getMessage());
+                }
+            })
+            .addOnFailureListener(e -> sendScanError("Google document scanner চালু হয়নি। Google Play services আপডেট করে আবার চেষ্টা করুন।"));
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_DOCUMENT_SCAN || resultCode != RESULT_OK) return;
+        GmsDocumentScanningResult result = GmsDocumentScanningResult.fromActivityResultIntent(data);
+        if (result == null || result.getPages() == null || result.getPages().isEmpty()) {
+            sendScanError("কোনো স্ক্যান পাওয়া যায়নি।");
+            return;
+        }
+        List<GmsDocumentScanningResult.Page> pages = result.getPages();
+        List<String> pageTexts = new ArrayList<>();
+        final int total = pages.size();
+        final int[] completed = {0};
+        for (GmsDocumentScanningResult.Page page : pages) {
+            try {
+                InputImage image = InputImage.fromFilePath(this, page.getImageUri());
+                textRecognizer.process(image)
+                    .addOnSuccessListener(visionText -> {
+                        pageTexts.add(visionText.getText());
+                        completed[0]++;
+                        if (completed[0] == total) sendScanText(String.join("\\n\\n", pageTexts));
+                    })
+                    .addOnFailureListener(e -> {
+                        completed[0]++;
+                        if (completed[0] == total) sendScanText(String.join("\\n\\n", pageTexts));
+                    });
+            } catch (Exception e) {
+                completed[0]++;
+                if (completed[0] == total) sendScanText(String.join("\\n\\n", pageTexts));
+            }
+        }
+    }
+
+    private void sendScanText(String text) {
+        String quoted = org.json.JSONObject.quote(text == null ? "" : text);
+        runOnUiThread(() -> {
+            if (webView != null) webView.evaluateJavascript(
+                "window.onVfLeadScan && window.onVfLeadScan(" + quoted + ")", null);
+        });
+    }
+
+    private void sendScanError(String message) {
+        String quoted = org.json.JSONObject.quote(message);
+        runOnUiThread(() -> {
+            if (webView != null) webView.evaluateJavascript(
+                "window.onVfLeadScanError && window.onVfLeadScanError(" + quoted + ")", null);
+        });
+    }
+
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -150,6 +237,11 @@ public class MainActivity extends Activity {
                 else waitForServer(attempt + 1);
             }, ok ? 0 : 250);
         }).start();
+    }
+
+    @Override protected void onDestroy() {
+        if (textRecognizer != null) textRecognizer.close();
+        super.onDestroy();
     }
 
     @Override public void onBackPressed() {
