@@ -28,7 +28,7 @@ import com.chaquo.python.android.AndroidPlatform;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import android.content.IntentSender;
-import com.google.android.gms.mlkit.documents.GmsDocumentScanning;
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning;
 import com.google.android.gms.mlkit.documents.GmsDocumentScanner;
 import com.google.android.gms.mlkit.documents.GmsDocumentScannerOptions;
 import com.google.android.gms.mlkit.documents.GmsDocumentScanningResult;
@@ -36,7 +36,6 @@ import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
-import com.google.android.gms.tasks.Task;
 import java.util.ArrayList;
 import java.util.List;
 

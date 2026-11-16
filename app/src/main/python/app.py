@@ -353,7 +353,7 @@ def delete_followup(item_id):
 @app.route("/api/phone-exists")
 @login_required
 def api_phone_exists():
-    phone = re.sub(r"\\D", "", request.args.get("phone", ""))
+    phone = re.sub(r"\D", "", request.args.get("phone", ""))
     if not phone:
         return {"exists": False}
     conn = db()
