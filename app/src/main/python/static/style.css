@@ -89,3 +89,12 @@ input,textarea,select{border-color:#e0e7f1;border-radius:12px;min-height:45px}te
 
 /* Whole Visit and Follow-up cards open their detail page. */
 .clickable-record{cursor:pointer}.clickable-record:focus-visible{outline:3px solid rgba(49,94,251,.35);outline-offset:3px}
+
+
+/* Overview dashboard cards are full clickable links. */
+.dashboard-stat-card{display:block;color:var(--ink);transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;cursor:pointer;position:relative;min-height:122px}
+.dashboard-stat-card:hover,.dashboard-stat-card:focus-visible{transform:translateY(-2px);border-color:rgba(49,94,251,.38);box-shadow:0 12px 28px rgba(30,55,90,.09);outline:none}
+.dashboard-stat-card:active{transform:translateY(0)}
+.stat-hint{display:block;margin-top:7px;color:var(--brand);font-size:11px;font-weight:700}
+.overview-list-link{display:block;padding:10px 9px;margin:0 -9px;border-radius:10px;color:var(--ink)}
+.overview-list-link:hover,.overview-list-link:focus-visible{background:#f3f6ff;outline:none}
