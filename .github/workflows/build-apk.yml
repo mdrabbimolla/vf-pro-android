@@ -42,7 +42,48 @@ jobs:
           assert response.status_code == 200 and b"Good day" in response.data
           for path in ("/dashboard", "/visits", "/followups", "/projects", "/users"):
               assert client.get(path).status_code == 200, path
-          print("Backend smoke tests passed.")
+
+          # Verify project-scoped access, detail pages, and append-only note history.
+          import sqlite3
+          from datetime import date
+          client.post("/projects", data={"name":"CI Project"}, follow_redirects=True)
+          with sqlite3.connect(app.DB_PATH) as conn:
+              project_id = conn.execute("SELECT id FROM projects WHERE name='CI Project'").fetchone()[0]
+          today = date.today().isoformat()
+          client.post("/visits", data={"client_name":"Shared Client","phone":"01700000001","project":"CI Project",
+              "visit_date":today,"visit_time":"10:00","notes":"Initial visit note"}, follow_redirects=True)
+          client.post("/visits", data={"client_name":"Private Client","phone":"01700000002","project":"",
+              "visit_date":today,"visit_time":"11:00","notes":"Private note"}, follow_redirects=True)
+          client.post("/followups", data={"client_name":"Shared Followup","phone":"01700000003","project":"CI Project",
+              "due_date":today,"due_time":"12:00","details":"Initial follow-up note"}, follow_redirects=True)
+          with sqlite3.connect(app.DB_PATH) as conn:
+              conn.row_factory = sqlite3.Row
+              shared_visit = conn.execute("SELECT id FROM visits WHERE client_name='Shared Client'").fetchone()["id"]
+              private_visit = conn.execute("SELECT id FROM visits WHERE client_name='Private Client'").fetchone()["id"]
+              shared_followup = conn.execute("SELECT id FROM followups WHERE client_name='Shared Followup'").fetchone()["id"]
+          assert client.get(f"/visits/{shared_visit}").status_code == 200
+          response = client.post(f"/visits/{shared_visit}/note", data={"note":"Updated visit note"}, follow_redirects=True)
+          assert response.status_code == 200 and b"Updated visit note" in response.data
+          with sqlite3.connect(app.DB_PATH) as conn:
+              assert conn.execute("SELECT COUNT(*) FROM note_history WHERE record_type='visit' AND record_id=?", (shared_visit,)).fetchone()[0] == 2
+          assert client.get(f"/followups/{shared_followup}").status_code == 200
+          client.post(f"/followups/{shared_followup}/note", data={"note":"Updated follow-up note"}, follow_redirects=True)
+          with sqlite3.connect(app.DB_PATH) as conn:
+              assert conn.execute("SELECT COUNT(*) FROM note_history WHERE record_type='followup' AND record_id=?", (shared_followup,)).fetchone()[0] == 2
+
+          client.post("/users", data={"full_name":"Test Staff","username":"staff","password":"staff-password-123","role":"staff"}, follow_redirects=True)
+          with sqlite3.connect(app.DB_PATH) as conn:
+              staff_id = conn.execute("SELECT id FROM users WHERE username='staff'").fetchone()[0]
+          client.post(f"/users/{staff_id}/project-access", data={"project_ids":str(project_id)}, follow_redirects=True)
+          client.post("/logout", follow_redirects=True)
+          client.post("/login", data={"username":"staff","password":"staff-password-123"}, follow_redirects=True)
+          visits_page = client.get("/visits")
+          assert b"Shared Client" in visits_page.data and b"Private Client" not in visits_page.data
+          assert client.get(f"/visits/{shared_visit}").status_code == 200
+          assert client.get(f"/visits/{private_visit}").status_code == 404
+          followups_page = client.get("/followups")
+          assert b"Shared Followup" in followups_page.data
+          print("Backend, note-history, and project-permission tests passed.")
           PY
       - name: Locate and install Android SDK packages
         shell: bash

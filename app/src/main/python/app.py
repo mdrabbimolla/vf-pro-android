@@ -405,6 +405,10 @@ def save_note(record_type,item_id):
     note=request.form.get("note","").strip()
     if note!=(item[note_column] or ""):
         now=datetime.now().isoformat(timespec="seconds")
+        has_history=conn.execute("SELECT 1 FROM note_history WHERE record_type=? AND record_id=? LIMIT 1",(record_type,item_id)).fetchone()
+        if not has_history:
+            conn.execute("INSERT INTO note_history(record_type,record_id,note_text,changed_by,changed_at) VALUES(?,?,?,?,?)",
+              (record_type,item_id,item[note_column] or "",item["created_by"],item["created_at"]))
         conn.execute("UPDATE "+table+" SET "+note_column+"=? WHERE id=?",(note,item_id))
         conn.execute("INSERT INTO note_history(record_type,record_id,note_text,changed_by,changed_at) VALUES(?,?,?,?,?)",
           (record_type,item_id,note,session["user_id"],now))
