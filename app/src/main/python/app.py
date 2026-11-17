@@ -87,6 +87,13 @@ def init_db():
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS user_project_access (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      granted_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, project_id)
+    );
     CREATE INDEX IF NOT EXISTS idx_visits_date ON visits(visit_date);
     CREATE INDEX IF NOT EXISTS idx_followups_due ON followups(due_date, status);
     """)
@@ -103,6 +110,23 @@ def init_db():
     if "converted_visit_id" not in columns:
         conn.execute("ALTER TABLE followups ADD COLUMN converted_visit_id INTEGER")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_followups_converted_visit ON followups(converted_visit_id) WHERE converted_visit_id IS NOT NULL")
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS note_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      record_type TEXT NOT NULL CHECK(record_type IN ('visit','followup')),
+      record_id INTEGER NOT NULL,
+      note_text TEXT NOT NULL DEFAULT '',
+      changed_by INTEGER NOT NULL REFERENCES users(id),
+      changed_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_note_history_record ON note_history(record_type, record_id, changed_at DESC);
+    """)
+    conn.execute("""INSERT INTO note_history(record_type,record_id,note_text,changed_by,changed_at)
+      SELECT 'visit',v.id,COALESCE(v.notes,''),v.created_by,v.created_at FROM visits v
+      WHERE NOT EXISTS (SELECT 1 FROM note_history h WHERE h.record_type='visit' AND h.record_id=v.id)""")
+    conn.execute("""INSERT INTO note_history(record_type,record_id,note_text,changed_by,changed_at)
+      SELECT 'followup',f.id,COALESCE(f.details,''),f.created_by,f.created_at FROM followups f
+      WHERE NOT EXISTS (SELECT 1 FROM note_history h WHERE h.record_type='followup' AND h.record_id=f.id)""")
 
     # Preserve project names already used in older records.
     existing = conn.execute("SELECT DISTINCT project FROM visits UNION SELECT DISTINCT project FROM followups").fetchall()
@@ -205,18 +229,18 @@ def logout():
 def dashboard():
     conn = db()
     uid, role = session["user_id"], session["role"]
-    scope = "" if role == "admin" else " WHERE created_by=?"
-    params = () if role == "admin" else (uid,)
+    scope = "" if role == "admin" else " WHERE (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?))"
+    params = () if role == "admin" else (uid,uid)
     visits = conn.execute("SELECT COUNT(*) FROM visits"+scope, params).fetchone()[0]
-    today_visits = conn.execute("SELECT COUNT(*) FROM visits"+(" WHERE " if role=="admin" else " WHERE created_by=? AND ")+"visit_date=?",
-                                ((date.today().isoformat(),) if role=="admin" else (uid,date.today().isoformat()))).fetchone()[0]
-    fscope = "" if role=="admin" else " AND created_by=?"
-    fp = () if role=="admin" else (uid,)
+    today_visits = conn.execute("SELECT COUNT(*) FROM visits"+(" WHERE " if role=="admin" else " WHERE (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)) AND ")+"visit_date=?",
+                                ((date.today().isoformat(),) if role=="admin" else (uid,uid,date.today().isoformat()))).fetchone()[0]
+    fscope = "" if role=="admin" else " AND (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?))"
+    fp = () if role=="admin" else (uid,uid)
     pending = conn.execute("SELECT COUNT(*) FROM followups WHERE status='Pending'"+fscope, fp).fetchone()[0]
     due = conn.execute("SELECT COUNT(*) FROM followups WHERE status='Pending' AND due_date<=?"+fscope,
                        (date.today().isoformat(),)+fp).fetchone()[0]
     recent = conn.execute("SELECT v.*,u.full_name FROM visits v JOIN users u ON u.id=v.created_by"+
-                          ("" if role=="admin" else " WHERE v.created_by=?")+" ORDER BY v.visit_date DESC,v.id DESC LIMIT 5", params).fetchall()
+                          ("" if role=="admin" else " WHERE (v.created_by=? OR v.project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?))")+" ORDER BY v.visit_date DESC,v.id DESC LIMIT 5", params).fetchall()
     due_items = conn.execute("SELECT * FROM followups WHERE status='Pending' AND due_date<=?"+fscope+
                              " ORDER BY due_date LIMIT 5", (date.today().isoformat(),)+fp).fetchall()
     return render_template("dashboard.html", visits=visits, today_visits=today_visits,
@@ -250,7 +274,7 @@ def visits():
     if session["role"]=="admin":
         rows=conn.execute("SELECT v.*,u.full_name FROM visits v JOIN users u ON u.id=v.created_by ORDER BY visit_date DESC,id DESC").fetchall()
     else:
-        rows=conn.execute("SELECT v.*,u.full_name FROM visits v JOIN users u ON u.id=v.created_by WHERE created_by=? ORDER BY visit_date DESC,id DESC",(session["user_id"],)).fetchall()
+        rows=conn.execute("SELECT v.*,u.full_name FROM visits v JOIN users u ON u.id=v.created_by WHERE (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)) ORDER BY visit_date DESC,id DESC",(session["user_id"],session["user_id"])).fetchall()
     projects=conn.execute("SELECT name FROM projects WHERE active=1 ORDER BY name").fetchall()
     return render_template("visits.html", rows=rows, projects=projects, active="visits")
 
@@ -281,7 +305,7 @@ def followups():
     if session["role"]=="admin":
         rows=conn.execute("SELECT f.*,u.full_name FROM followups f JOIN users u ON u.id=f.created_by ORDER BY CASE status WHEN 'Pending' THEN 0 ELSE 1 END,due_date").fetchall()
     else:
-        rows=conn.execute("SELECT f.*,u.full_name FROM followups f JOIN users u ON u.id=f.created_by WHERE created_by=? ORDER BY CASE status WHEN 'Pending' THEN 0 ELSE 1 END,due_date",(session["user_id"],)).fetchall()
+        rows=conn.execute("SELECT f.*,u.full_name FROM followups f JOIN users u ON u.id=f.created_by WHERE (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)) ORDER BY CASE status WHEN 'Pending' THEN 0 ELSE 1 END,due_date",(session["user_id"],session["user_id"])).fetchall()
     projects=conn.execute("SELECT name FROM projects WHERE active=1 ORDER BY name").fetchall()
     return render_template("followups.html", rows=rows, projects=projects, active="followups")
 
@@ -290,7 +314,7 @@ def followups():
 def update_followup(item_id):
     conn=db()
     item=conn.execute("SELECT * FROM followups WHERE id=?",(item_id,)).fetchone()
-    if not item or (session["role"]!="admin" and item["created_by"]!=session["user_id"]):
+    if not item or (not can_access_record(item)):
         flash("রেকর্ড পাওয়া যায়নি বা অনুমতি নেই।","error")
     else:
         status=request.form.get("status")
@@ -306,7 +330,7 @@ def update_followup(item_id):
 def convert_followup(item_id):
     conn=db()
     item=conn.execute("SELECT * FROM followups WHERE id=?",(item_id,)).fetchone()
-    if not item or (session["role"]!="admin" and item["created_by"]!=session["user_id"]):
+    if not item or (not can_access_record(item)):
         flash("রেকর্ড পাওয়া যায়নি বা অনুমতি নেই।", "error")
     elif item["converted_visit_id"]:
         flash("এই Follow-up থেকে Visit আগেই তৈরি হয়েছে।", "error")
@@ -343,7 +367,7 @@ def convert_followup(item_id):
 @login_required
 def delete_visit(item_id):
     conn=db(); item=conn.execute("SELECT * FROM visits WHERE id=?",(item_id,)).fetchone()
-    if not item or (session["role"]!="admin" and item["created_by"]!=session["user_id"]):
+    if not item or (not can_access_record(item)):
         flash("রেকর্ড পাওয়া যায়নি বা অনুমতি নেই।", "error")
     else:
         conn.execute("UPDATE followups SET converted_visit_id=NULL WHERE converted_visit_id=?",(item_id,))
@@ -354,13 +378,66 @@ def delete_visit(item_id):
 @login_required
 def delete_followup(item_id):
     conn=db(); item=conn.execute("SELECT * FROM followups WHERE id=?",(item_id,)).fetchone()
-    if not item or (session["role"]!="admin" and item["created_by"]!=session["user_id"]):
+    if not item or (not can_access_record(item)):
         flash("রেকর্ড পাওয়া যায়নি বা অনুমতি নেই।", "error")
     else:
         conn.execute("DELETE FROM followups WHERE id=?",(item_id,)); conn.commit(); flash("Follow-up মুছে ফেলা হয়েছে।", "success")
     return redirect(url_for("followups"))
 
 
+
+
+def can_access_record(item):
+    if not item: return False
+    if session.get("role")=="admin" or item["created_by"]==session.get("user_id"): return True
+    project=(item["project"] or "").strip()
+    if not project: return False
+    return bool(db().execute("""SELECT 1 FROM user_project_access a JOIN projects p ON p.id=a.project_id
+      WHERE a.user_id=? AND p.name=? LIMIT 1""",(session.get("user_id"),project)).fetchone())
+
+def save_note(record_type,item_id):
+    conn=db()
+    table,note_column=("visits","notes") if record_type=="visit" else ("followups","details")
+    item=conn.execute("SELECT * FROM "+table+" WHERE id=?",(item_id,)).fetchone()
+    if not can_access_record(item):
+        flash("রেকর্ড পাওয়া যায়নি বা অনুমতি নেই।","error")
+        return redirect(url_for("visits" if record_type=="visit" else "followups"))
+    note=request.form.get("note","").strip()
+    if note!=(item[note_column] or ""):
+        now=datetime.now().isoformat(timespec="seconds")
+        conn.execute("UPDATE "+table+" SET "+note_column+"=? WHERE id=?",(note,item_id))
+        conn.execute("INSERT INTO note_history(record_type,record_id,note_text,changed_by,changed_at) VALUES(?,?,?,?,?)",
+          (record_type,item_id,note,session["user_id"],now))
+        conn.commit()
+        flash("নোট আপডেট হয়েছে এবং History-তে সংরক্ষিত হয়েছে।","success")
+    else: flash("নোটে কোনো পরিবর্তন করা হয়নি।","info")
+    return redirect(url_for("visit_detail" if record_type=="visit" else "followup_detail",item_id=item_id))
+
+@app.route("/visits/<int:item_id>")
+@login_required
+def visit_detail(item_id):
+    conn=db()
+    item=conn.execute("SELECT v.*,u.full_name FROM visits v JOIN users u ON u.id=v.created_by WHERE v.id=?",(item_id,)).fetchone()
+    if not can_access_record(item): return render_template("error.html",code=404,message="রেকর্ডটি পাওয়া যায়নি বা দেখার অনুমতি নেই。"),404
+    history=conn.execute("SELECT h.*,u.full_name FROM note_history h JOIN users u ON u.id=h.changed_by WHERE h.record_type='visit' AND h.record_id=? ORDER BY h.id DESC",(item_id,)).fetchall()
+    return render_template("detail.html",item=item,history=history,record_type="Visit",note=item["notes"] or "",back_url=url_for("visits"),note_action=url_for("save_visit_note",item_id=item_id),active="visits")
+
+@app.route("/followups/<int:item_id>")
+@login_required
+def followup_detail(item_id):
+    conn=db()
+    item=conn.execute("SELECT f.*,u.full_name FROM followups f JOIN users u ON u.id=f.created_by WHERE f.id=?",(item_id,)).fetchone()
+    if not can_access_record(item): return render_template("error.html",code=404,message="রেকর্ডটি পাওয়া যায়নি বা দেখার অনুমতি নেই۔"),404
+    history=conn.execute("SELECT h.*,u.full_name FROM note_history h JOIN users u ON u.id=h.changed_by WHERE h.record_type='followup' AND h.record_id=? ORDER BY h.id DESC",(item_id,)).fetchall()
+    return render_template("detail.html",item=item,history=history,record_type="Follow-up",note=item["details"] or "",back_url=url_for("followups"),note_action=url_for("save_followup_note",item_id=item_id),active="followups")
+
+@app.route("/visits/<int:item_id>/note",methods=["POST"])
+@login_required
+def save_visit_note(item_id): return save_note("visit",item_id)
+
+@app.route("/followups/<int:item_id>/note",methods=["POST"])
+@login_required
+def save_followup_note(item_id): return save_note("followup",item_id)
 
 @app.route("/api/phone-exists")
 @login_required
@@ -372,7 +449,9 @@ def api_phone_exists():
     if session["role"] == "admin":
         found = conn.execute("SELECT 1 FROM visits WHERE phone=? UNION SELECT 1 FROM followups WHERE phone=? LIMIT 1", (phone, phone)).fetchone()
     else:
-        found = conn.execute("SELECT 1 FROM visits WHERE phone=? AND created_by=? UNION SELECT 1 FROM followups WHERE phone=? AND created_by=? LIMIT 1", (phone, session["user_id"], phone, session["user_id"])).fetchone()
+        found = conn.execute("""SELECT 1 FROM visits WHERE phone=? AND (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?))
+          UNION SELECT 1 FROM followups WHERE phone=? AND (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)) LIMIT 1""",
+          (phone,session["user_id"],session["user_id"],phone,session["user_id"],session["user_id"])).fetchone()
     return {"exists": bool(found)}
 
 @app.route("/api/reminders")
@@ -383,8 +462,8 @@ def api_reminders():
         visits_rows = conn.execute("SELECT id,client_name,project,visit_date,visit_time FROM visits").fetchall()
         followup_rows = conn.execute("SELECT id,client_name,project,due_date,due_time FROM followups WHERE status='Pending'").fetchall()
     else:
-        visits_rows = conn.execute("SELECT id,client_name,project,visit_date,visit_time FROM visits WHERE created_by=?", (session["user_id"],)).fetchall()
-        followup_rows = conn.execute("SELECT id,client_name,project,due_date,due_time FROM followups WHERE status='Pending' AND created_by=?", (session["user_id"],)).fetchall()
+        visits_rows = conn.execute("""SELECT id,client_name,project,visit_date,visit_time FROM visits WHERE created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)""", (session["user_id"],session["user_id"])).fetchall()
+        followup_rows = conn.execute("""SELECT id,client_name,project,due_date,due_time FROM followups WHERE status='Pending' AND (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?))""", (session["user_id"],session["user_id"])).fetchall()
     items = []
     for row in visits_rows:
         items.append({"key":"visit-" + str(row["id"]), "type":"Visit", "id":row["id"],
@@ -462,7 +541,30 @@ def users():
             except sqlite3.IntegrityError:
                 flash("এই username আগে থেকেই আছে।","error")
     rows=conn.execute("SELECT id,username,full_name,role,active,created_at FROM users ORDER BY id").fetchall()
-    return render_template("users.html", rows=rows, active="users")
+    projects=conn.execute("SELECT id,name FROM projects WHERE active=1 ORDER BY name").fetchall()
+    access_rows=conn.execute("SELECT user_id,project_id FROM user_project_access").fetchall()
+    access_map={}
+    for access in access_rows: access_map.setdefault(access["user_id"],set()).add(access["project_id"])
+    return render_template("users.html", rows=rows, projects=projects, access_map=access_map, active="users")
+
+@app.route("/users/<int:user_id>/project-access",methods=["POST"])
+@admin_required
+def update_project_access(user_id):
+    conn=db()
+    user=conn.execute("SELECT id,role FROM users WHERE id=?",(user_id,)).fetchone()
+    if not user or user["role"]!="staff":
+        flash("Staff account পাওয়া যায়নি।","error"); return redirect(url_for("users"))
+    selected=[]
+    for raw in request.form.getlist("project_ids"):
+        try: selected.append(int(raw))
+        except (TypeError,ValueError): pass
+    conn.execute("DELETE FROM user_project_access WHERE user_id=?",(user_id,))
+    now=datetime.now().isoformat(timespec="seconds")
+    for project_id in set(selected):
+        if conn.execute("SELECT 1 FROM projects WHERE id=? AND active=1",(project_id,)).fetchone():
+            conn.execute("INSERT OR IGNORE INTO user_project_access(user_id,project_id,granted_by,created_at) VALUES(?,?,?,?)",(user_id,project_id,session["user_id"],now))
+    conn.commit(); flash("Project access আপডেট হয়েছে।","success")
+    return redirect(url_for("users"))
 
 @app.route("/users/<int:user_id>/toggle", methods=["POST"])
 @admin_required

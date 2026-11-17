@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f4f7fc"><title>{{record_type}} Details | V&F Pro</title>
+<link rel="stylesheet" href="{{url_for('static',filename='style.css')}}">
+<link rel="manifest" href="{{url_for('static',filename='app.webmanifest')}}">
+<link rel="icon" href="{{url_for('static',filename='icon.svg')}}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{url_for('static',filename='apple-touch-icon.png')}}">
+</head>
+<body><main class="shell">
+<header class="top"><a class="brand" href="{{url_for('dashboard')}}">V<span>&</span>F Pro</a>
+<div class="profile"><div class="user">{{session.get('full_name','')}} · {{session.get('role','')|title}}</div><form method="post" action="{{url_for('logout')}}"><button class="btn logout">Logout</button></form></div></header>
+<nav class="nav"><a href="{{url_for('dashboard')}}">Overview</a><a class="{{'active' if active=='visits' else ''}}" href="{{url_for('visits')}}">Visits</a><a class="{{'active' if active=='followups' else ''}}" href="{{url_for('followups')}}">Follow-ups</a>{% if session.get('role')=='admin' %}<a href="{{url_for('projects')}}">Projects</a><a href="{{url_for('users')}}">Users</a>{% endif %}</nav>
+<div class="page-heading"><a class="btn" href="{{back_url}}">← Back</a><p class="hero-kicker">{{record_type}} DETAILS</p><h1>{{item.client_name}}</h1><p class="sub">{{item.phone}} · {{item.project or 'Project not assigned'}}</p></div>
+<section class="card form-card">
+<div class="record-meta"><span><b>Created by:</b> {{item.full_name}}</span>{% if record_type=='Visit' %}<span><b>Visit:</b> {{item.visit_date}} · {{item.visit_time}}</span><span><b>Purpose:</b> {{item.purpose or 'Not specified'}}</span>{% else %}<span><b>Follow-up:</b> {{item.due_date}} · {{item.due_time}}</span><span><b>Status:</b> {{item.status}}</span>{% endif %}</div>
+<h2>Update Note</h2><form method="post" action="{{note_action}}" class="stack"><div class="field"><label>Current Note</label><textarea name="note" rows="5" placeholder="Write or update the note...">{{note}}</textarea></div><button class="btn primary">Save Note</button></form>
+</section>
+<section class="list-section"><div class="section-title"><h2>Note History</h2><span class="count">{{history|length}} entries</span></div>
+<div class="record-list">{% for h in history %}<article class="record-card"><div class="record-main"><strong>{{h.full_name}}</strong><span class="date-chip">{{h.changed_at}}</span></div><p class="record-notes">{{h.note_text or 'Empty note'}}</p></article>{% else %}<div class="empty card">No note history yet.</div>{% endfor %}</div></section>
+</main><script src="{{url_for('static',filename='pwa.js')}}" defer></script></body></html>
