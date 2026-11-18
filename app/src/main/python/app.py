@@ -276,7 +276,7 @@ def visits():
     else:
         rows=conn.execute("SELECT v.*,u.full_name FROM visits v JOIN users u ON u.id=v.created_by WHERE (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)) ORDER BY visit_date DESC,id DESC",(session["user_id"],session["user_id"])).fetchall()
     projects=conn.execute("SELECT name FROM projects WHERE active=1 ORDER BY name").fetchall()
-    return render_template("visits.html", rows=rows, projects=projects, active="visits")
+    return render_template("visits.html", rows=rows, projects=projects, active="visits", list_only=request.args.get("list_only") == "1")
 
 @app.route("/followups", methods=["GET","POST"])
 @login_required
@@ -307,7 +307,7 @@ def followups():
     else:
         rows=conn.execute("SELECT f.*,u.full_name FROM followups f JOIN users u ON u.id=f.created_by WHERE (created_by=? OR project IN (SELECT p.name FROM projects p JOIN user_project_access a ON a.project_id=p.id WHERE a.user_id=?)) ORDER BY CASE status WHEN 'Pending' THEN 0 ELSE 1 END,due_date",(session["user_id"],session["user_id"])).fetchall()
     projects=conn.execute("SELECT name FROM projects WHERE active=1 ORDER BY name").fetchall()
-    return render_template("followups.html", rows=rows, projects=projects, active="followups")
+    return render_template("followups.html", rows=rows, projects=projects, active="followups", list_only=request.args.get("list_only") == "1")
 
 @app.route("/followups/<int:item_id>/status", methods=["POST"])
 @login_required
